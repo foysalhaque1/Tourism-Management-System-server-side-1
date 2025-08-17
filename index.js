@@ -1112,6 +1112,51 @@ async function run() {
 			}
 		});
 
+		//    Backend for overview
+
+		app.get('/user/stats', async (req, res) => {
+			try {
+				const totalPaymentsResult = await paymentsCollection.aggregate([
+					{
+						$group: {
+							_id: null,
+							total: { $sum: '$amount' }
+						}
+					}
+				]).toArray();
+
+				const totalTourGuides = await tourGuides.countDocuments({ role: 'tour guide' });
+				const totalClients = await usersCollection.countDocuments({ role: 'user' });
+				const totalPackages = await tourPackage.countDocuments();
+
+				// Count all stories in usersCollection (user stories)
+				const userStories = await usersCollection.aggregate([
+					{ $match: { stories: { $exists: true } } },
+					{ $unwind: '$stories' },
+					{ $count: 'count' }
+				]).toArray();
+
+				// Count all stories in tourGuidesCollection (guide stories)
+				const guideStories = await tourGuides.aggregate([
+					{ $match: { stories: { $exists: true } } },
+					{ $unwind: '$stories' },
+					{ $count: 'count' }
+				]).toArray();
+
+				const totalStories = (userStories[0]?.count || 0) + (guideStories[0]?.count || 0);
+
+				res.send({
+					totalPayments: totalPaymentsResult[0]?.total || 0,
+					totalTourGuides,
+					totalPackages,
+					totalClients,
+					totalStories
+				});
+			} catch (error) {
+				res.status(500).send({ error: 'Failed to load admin stats' });
+			}
+		});
+
 
 		// search in admin for users
 		app.get('/users', async (req, res) => {
@@ -1163,26 +1208,62 @@ async function run() {
 				console.error('User fetch error:', error);
 				res.status(500).send({ error: 'Internal Server Error' });
 			}
+
+			// In your packages route controller
+			app.getPackages = async (req, res) => {
+				try {
+					let query = tourPackage.find();
+
+					// Handle sorting
+					if (req.query.sort === 'asc') {
+						query = query.sort({ price: 1 }); // Ascending
+					} else if (req.query.sort === 'desc') {
+						query = query.sort({ price: -1 }); // Descending
+					}
+
+					const packages = await query.exec();
+					res.status(200).json(packages);
+				} catch (error) {
+					res.status(500).json({ message: error.message });
+				}
+			};
+
+			// Get packages with sorting capability
+			app.get('/sort', async (req, res) => {
+				try {
+					const { sort = 'default', limit } = req.query;
+
+					// Validate sort parameter
+					const validSorts = ['default', 'asc', 'desc'];
+					if (!validSorts.includes(sort)) {
+						return res.status(400).json({ message: 'Invalid sort parameter' });
+					}
+
+					// Build sort query
+					let sortQuery = {};
+					switch (sort) {
+						case 'asc':
+							sortQuery = { price: 1 }; // Ascending
+							break;
+						case 'desc':
+							sortQuery = { price: -1 }; // Descending
+							break;
+						default:
+							sortQuery = { createdAt: -1 }; // Newest first
+					}
+
+					// Get packages with sorting
+					const packages = await tourPackage.find()
+						.sort(sortQuery)
+						.limit(parseInt(limit) || 0)
+						.exec();
+
+					res.status(200).json(packages);
+				} catch (error) {
+					res.status(500).json({ message: error.message });
+				}
+			});
 		});
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
